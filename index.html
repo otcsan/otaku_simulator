@@ -1,0 +1,678 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>アイドルライブ 3Dオタクシミュレーター</title>
+    <style>
+        html, body {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            background-color: #000;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            overflow: hidden; /* スクロール禁止 */
+            touch-action: none; /* ピンチズーム等禁止 */
+        }
+
+        /* 3D描画エリア：全画面 */
+        #canvas-container {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 0;
+        }
+
+        /* ステータス表示 */
+        #status {
+            position: absolute;
+            top: 40px; /* ノッチ対策で少し下げる */
+            left: 15px;
+            color: rgba(255, 255, 255, 0.9);
+            font-size: 20px;
+            pointer-events: none;
+            text-shadow: 0 2px 4px rgba(0,0,0,0.8);
+            font-weight: bold;
+            z-index: 10;
+            background: rgba(0,0,0,0.4);
+            padding: 5px 12px;
+            border-radius: 20px;
+            border-left: 5px solid #ff0055;
+            backdrop-filter: blur(4px);
+        }
+
+        /* UIオーバーレイ（画面下部） */
+        #ui-overlay {
+            position: fixed;
+            bottom: 0;
+            left: 0;
+            width: 100%;
+            background: linear-gradient(to top, rgba(0,0,0,0.95) 70%, rgba(0,0,0,0) 100%);
+            padding: 20px 10px 20px 10px; /* 下部はiPhoneのバー対策で少し空ける */
+            box-sizing: border-box;
+            z-index: 100;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            max-height: 60vh; /* 画面の6割まで */
+            overflow-y: auto; /* コンテンツが多い場合はスクロール */
+        }
+
+        /* コントロール行（グリッドレイアウト） */
+        .control-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr; /* 2列 */
+            gap: 8px;
+        }
+
+        /* 個別のコントロールボックス */
+        .control-box {
+            background: rgba(50, 50, 50, 0.7);
+            border-radius: 8px;
+            padding: 8px;
+            display: flex;
+            flex-direction: column;
+            gap: 5px;
+            border: 1px solid rgba(255,255,255,0.1);
+        }
+
+        .box-header {
+            font-size: 11px;
+            color: #aaa;
+            text-transform: uppercase;
+            font-weight: bold;
+            display: flex;
+            justify-content: space-between;
+        }
+        .header-hl { color: #ffdddd; }
+
+        .counter-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .count-val {
+            font-family: monospace;
+            font-size: 18px;
+            color: white;
+            font-weight: bold;
+        }
+
+        /* +/- ボタン */
+        .btn-adj {
+            width: 32px;
+            height: 32px;
+            border-radius: 50%;
+            border: none;
+            background: #555;
+            color: white;
+            font-size: 16px;
+            font-weight: bold;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.3);
+        }
+        .btn-adj:active { transform: scale(0.9); background: #777; }
+
+        /* スライダー */
+        .slider-row {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            background: rgba(50,50,50,0.7);
+            padding: 8px 12px;
+            border-radius: 8px;
+            color: white;
+            font-size: 12px;
+            font-weight: bold;
+        }
+        input[type=range] { flex: 1; height: 20px; }
+
+        /* アクションボタンエリア（横スクロール） */
+        .action-scroll {
+            display: flex;
+            gap: 10px;
+            overflow-x: auto;
+            padding: 5px 0;
+            -webkit-overflow-scrolling: touch; /* iOS慣性スクロール */
+            scrollbar-width: none; /* Firefox */
+        }
+        .action-scroll::-webkit-scrollbar { display: none; } /* Chrome/Safari */
+
+        .btn-action {
+            flex: 0 0 auto; /* 縮まない */
+            padding: 12px 20px;
+            font-size: 14px;
+            font-weight: bold;
+            color: white;
+            background: #333;
+            border: 1px solid #555;
+            border-radius: 20px;
+            cursor: pointer;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.3);
+            transition: transform 0.1s, background 0.2s;
+        }
+        .btn-action:active { transform: scale(0.95); background: #444; }
+        
+        .btn-red {
+            background: linear-gradient(135deg, #800 0%, #500 100%);
+            border-color: #a44;
+            color: #ffd;
+        }
+
+        /* セキュリティ色分け */
+        .lbl-noizero { color: #88aaff; }
+        .lbl-bonds { color: #ff8888; }
+
+    </style>
+    <script src="https://unpkg.com/three@0.160.0/build/three.min.js"></script>
+</head>
+<body>
+
+    <!-- 全画面3Dエリア -->
+    <div id="canvas-container"></div>
+
+    <!-- ステータス -->
+    <div id="status">State: IDLE</div>
+
+    <!-- UIオーバーレイ -->
+    <div id="ui-overlay">
+        
+        <!-- 速度設定 -->
+        <div class="slider-row">
+            <span>SPEED</span>
+            <input type="range" id="speedSlider" min="0.1" max="3.0" step="0.1" value="1.0">
+            <span id="speedVal">1.0x</span>
+        </div>
+
+        <!-- 人数設定（2列グリッド） -->
+        <div class="control-grid">
+            <!-- 前方オタク -->
+            <div class="control-box">
+                <div class="box-header">Front (±10)</div>
+                <div class="counter-row">
+                    <button class="btn-adj" onclick="modifyPopulation('front', -10)">-</button>
+                    <span id="countFront" class="count-val">0</span>
+                    <button class="btn-adj" onclick="modifyPopulation('front', 10)">+</button>
+                </div>
+            </div>
+
+            <!-- 後方オタク -->
+            <div class="control-box">
+                <div class="box-header">Rear (±10)</div>
+                <div class="counter-row">
+                    <button class="btn-adj" onclick="modifyPopulation('rear', -10)">-</button>
+                    <span id="countRear" class="count-val">0</span>
+                    <button class="btn-adj" onclick="modifyPopulation('rear', 10)">+</button>
+                </div>
+            </div>
+
+            <!-- ノイゼロ -->
+            <div class="control-box">
+                <div class="box-header lbl-noizero">Noizero (±1)</div>
+                <div class="counter-row">
+                    <button class="btn-adj" onclick="modifySecurity('NOIZERO', -1)">-</button>
+                    <span id="countNoizero" class="count-val">0</span>
+                    <button class="btn-adj" onclick="modifySecurity('NOIZERO', 1)">+</button>
+                </div>
+            </div>
+
+            <!-- ボンズ -->
+            <div class="control-box">
+                <div class="box-header lbl-bonds">Bonds (±1)</div>
+                <div class="counter-row">
+                    <button class="btn-adj" onclick="modifySecurity('BONDS', -1)">-</button>
+                    <span id="countBonds" class="count-val">0</span>
+                    <button class="btn-adj" onclick="modifySecurity('BONDS', 1)">+</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- アクションボタン（横スクロール） -->
+        <div class="action-scroll">
+            <button class="btn-action" onclick="setMode('IDLE')">棒立ち</button>
+            <button class="btn-action" onclick="setMode('MOSH')">モッシュ</button>
+            <button class="btn-action" onclick="setMode('CIRCLE_L')">↺ 左回り</button>
+            <button class="btn-action" onclick="setMode('CIRCLE_R')">↻ 右回り</button>
+            <button class="btn-action btn-red" onclick="setMode('WOD_PREPARE')">WOD待機</button>
+            <button class="btn-action btn-red" onclick="setMode('WOD_GO')">WOD突撃</button>
+            <button class="btn-action" onclick="resetPositions()">リセット</button>
+        </div>
+    </div>
+
+    <script>
+        // --- 設定 ---
+        const INITIAL_FRONT_COUNT = 40;
+        const INITIAL_REAR_COUNT = 100;
+        
+        const STAGE_Z = -30;
+        const BASE_MAX_SPEED = 0.2; 
+        const FRICTION = 0.95;
+        let globalSpeedMultiplier = 1.0;
+
+        // --- Three.js Setup ---
+        const container = document.getElementById('canvas-container');
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x1a1a1a); // 少し明るめの黒
+        scene.fog = new THREE.Fog(0x1a1a1a, 30, 100);
+
+        const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 1000);
+        // スマホ縦画面用に少しカメラを引く
+        camera.position.set(0, 50, 70);
+        camera.lookAt(0, 0, -10);
+
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.shadowMap.enabled = true;
+        container.appendChild(renderer.domElement);
+
+        // --- Lighting ---
+        const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+        scene.add(ambientLight);
+        const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
+        dirLight.position.set(20, 50, 20);
+        dirLight.castShadow = true;
+        dirLight.shadow.camera.top = 60; dirLight.shadow.camera.bottom = -60;
+        dirLight.shadow.camera.left = -60; dirLight.shadow.camera.right = 60;
+        dirLight.shadow.mapSize.width = 2048; dirLight.shadow.mapSize.height = 2048;
+        scene.add(dirLight);
+        const spotLight = new THREE.SpotLight(0xffffff, 100);
+        spotLight.position.set(0, 50, STAGE_Z + 15);
+        spotLight.target.position.set(0, 0, STAGE_Z);
+        spotLight.angle = Math.PI / 4;
+        spotLight.penumbra = 0.5;
+        scene.add(spotLight);
+        scene.add(spotLight.target);
+
+        // --- Environment ---
+        const floorGeo = new THREE.PlaneGeometry(200, 200);
+        const floorMat = new THREE.MeshStandardMaterial({ color: 0x333333, roughness: 0.6 });
+        const floor = new THREE.Mesh(floorGeo, floorMat);
+        floor.rotation.x = -Math.PI / 2;
+        floor.receiveShadow = true;
+        scene.add(floor);
+
+        const stageHeight = 4;
+        const stageGeo = new THREE.BoxGeometry(60, stageHeight, 15);
+        const stageMat = new THREE.MeshStandardMaterial({ color: 0x111111 });
+        const stage = new THREE.Mesh(stageGeo, stageMat);
+        stage.position.set(0, stageHeight / 2, STAGE_Z);
+        stage.castShadow = true;
+        stage.receiveShadow = true;
+        scene.add(stage);
+
+        // Idol
+        const idolGroup = new THREE.Group();
+        const idolPosY = stageHeight + 1.25; 
+        for(let i=-2; i<=2; i+=2){
+            const bodyGeo = new THREE.CapsuleGeometry(0.7, 1.1, 4, 8);
+            const bodyMat = new THREE.MeshStandardMaterial({ color: 0xff99cc, emissive: 0xff55aa, emissiveIntensity: 0.6 });
+            const idol = new THREE.Mesh(bodyGeo, bodyMat);
+            idol.position.set(i*5, idolPosY, STAGE_Z);
+            idol.castShadow = true;
+            idolGroup.add(idol);
+        }
+        scene.add(idolGroup);
+
+        // --- CLASSES ---
+        class Character {
+            constructor() {
+                this.velocity = new THREE.Vector3(0, 0, 0);
+                this.isFallen = false;
+                this.recoverTimer = 0;
+            }
+            dispose() {
+                scene.remove(this.mesh);
+                this.mesh.geometry.dispose();
+                this.mesh.material.dispose();
+            }
+        }
+
+        class Otaku extends Character {
+            constructor(id, isFrontRow, isFC) {
+                super();
+                this.id = id;
+                this.isFrontRow = isFrontRow; 
+                this.isFC = isFC;
+
+                let colorVal;
+                let emissiveInt = 0.5;
+                if (this.isFC) {
+                    colorVal = 0xff6600; emissiveInt = 0.2;
+                } else {
+                    const hue = Math.random();
+                    colorVal = new THREE.Color().setHSL(hue, 0.8, 0.5);
+                }
+
+                const material = new THREE.MeshStandardMaterial({ 
+                    color: colorVal, emissive: colorVal, emissiveIntensity: emissiveInt, roughness: 0.5
+                });
+                const geometry = new THREE.CapsuleGeometry(0.6, 1.8, 4, 8);
+                this.mesh = new THREE.Mesh(geometry, material);
+                this.mesh.castShadow = true;
+
+                this.originalPos = new THREE.Vector3();
+                this.setInitialPosition();
+                this.noiseOffset = Math.random() * 100;
+                scene.add(this.mesh);
+            }
+
+            setInitialPosition() {
+                let x, z;
+                if (this.isFrontRow) {
+                    x = (Math.random() - 0.5) * 40;
+                    z = -5 + (Math.random() - 0.5) * 8; 
+                } else {
+                    x = (Math.random() - 0.5) * 30;
+                    z = 15 + (Math.random() - 0.5) * 15;
+                }
+                if (this.isFC) { x=0; z=15; }
+                this.originalPos.set(x, 1.5, z);
+                this.mesh.position.copy(this.originalPos);
+                this.mesh.rotation.set(0,0,0);
+                this.isFallen = false;
+            }
+
+            fall() {
+                if (this.isFallen) return;
+                this.isFallen = true;
+                this.recoverTimer = 20 + Math.random() * 30;
+                this.mesh.rotation.z = Math.PI / 2;
+                this.mesh.rotation.y = Math.random() * Math.PI * 2;
+                this.mesh.position.y = 0.6;
+                this.velocity.multiplyScalar(0.5);
+            }
+
+            standUp() {
+                this.isFallen = false;
+                this.mesh.rotation.set(0,0,0);
+                this.mesh.position.y = 1.5;
+            }
+
+            update(mode, allOtakus) {
+                if (this.isFallen) {
+                    this.recoverTimer--;
+                    if (this.recoverTimer <= 0) this.standUp();
+                    this.velocity.multiplyScalar(0.9);
+                    this.mesh.position.add(this.velocity);
+                    return;
+                }
+
+                const pos = this.mesh.position;
+                let fx = 0, fz = 0;
+
+                for (let other of allOtakus) {
+                    if (other === this) continue;
+                    const dx = pos.x - other.mesh.position.x;
+                    const dz = pos.z - other.mesh.position.z;
+                    const distSq = dx*dx + dz*dz;
+                    const minDist = 1.3; 
+
+                    if (distSq < minDist * minDist && distSq > 0) {
+                        const dist = Math.sqrt(distSq);
+                        const nx = dx / dist; const nz = dz / dist;
+                        const push = (minDist - dist) * 0.5;
+                        pos.x += nx * push; pos.z += nz * push;
+
+                        const rvx = this.velocity.x - other.velocity.x;
+                        const rvz = this.velocity.z - other.velocity.z;
+                        const vNormal = rvx * nx + rvz * nz;
+
+                        if (vNormal < 0) {
+                            const j = -(1 + 1.2) * vNormal;
+                            this.velocity.x += nx * j * 0.5;
+                            this.velocity.z += nz * j * 0.5;
+                            if (Math.abs(j) > 0.6 && Math.random() < 0.05) {
+                                this.fall();
+                                if(!other.isFrontRow && Math.random() < 0.5) other.fall();
+                            }
+                        }
+                    }
+                }
+
+                const actualMaxSpeed = BASE_MAX_SPEED * globalSpeedMultiplier;
+                
+                if (this.isFrontRow) {
+                    this.mesh.position.y = 1.5 + Math.abs(Math.sin(Date.now()*0.01*globalSpeedMultiplier + this.noiseOffset)) * 0.2;
+                    fx += (this.originalPos.x - pos.x) * 0.1;
+                    fz += (this.originalPos.z - pos.z) * 0.1;
+                } else {
+                    const centerX = 0; const centerZ = 15; 
+                    switch (mode) {
+                        case 'IDLE':
+                            this.mesh.position.y = 1.5 + Math.abs(Math.sin(Date.now()*0.01*globalSpeedMultiplier + this.noiseOffset)) * 0.5;
+                            fx += (this.originalPos.x - pos.x) * 0.02; fz += (this.originalPos.z - pos.z) * 0.02;
+                            break;
+                        case 'MOSH':
+                            this.mesh.position.y = 1.5;
+                            fx += (Math.random()-0.5) * 0.5 * globalSpeedMultiplier;
+                            fz += (Math.random()-0.5) * 0.5 * globalSpeedMultiplier;
+                            fx += (centerX - pos.x) * 0.01; fz += (centerZ - pos.z) * 0.01;
+                            break;
+                        case 'CIRCLE_L': case 'CIRCLE_R':
+                            this.mesh.position.y = 1.5;
+                            const cdx = pos.x - centerX; const cdz = pos.z - centerZ;
+                            const cDist = Math.sqrt(cdx*cdx + cdz*cdz);
+                            if (cDist > 15) fx -= (cdx/cDist)*0.5*globalSpeedMultiplier;
+                            else if (cDist < 8) fx += (cdx/cDist)*0.5*globalSpeedMultiplier;
+                            let tx = -cdz; let tz = cdx;
+                            if (mode === 'CIRCLE_R') { tx = cdz; tz = -cdx; }
+                            const tLen = Math.sqrt(tx*tx + tz*tz);
+                            if(tLen > 0) { fx += (tx/tLen)*0.4*globalSpeedMultiplier; fz += (tz/tLen)*0.4*globalSpeedMultiplier; }
+                            break;
+                        case 'WOD_PREPARE':
+                            this.mesh.position.y = 1.5;
+                            const targetX = pos.x > 0 ? 20 : -20;
+                            fx += (targetX - pos.x) * 0.05 * globalSpeedMultiplier;
+                            fz += (this.originalPos.z - pos.z) * 0.05;
+                            if (Math.abs(pos.x) < 3) fx += (pos.x > 0 ? 1 : -1) * 1.0 * globalSpeedMultiplier;
+                            break;
+                        case 'WOD_GO':
+                            this.mesh.position.y = 1.5 + Math.random()*0.5;
+                            if (pos.x > 1.5) fx -= 0.8 * globalSpeedMultiplier;
+                            else if (pos.x < -1.5) fx += 0.8 * globalSpeedMultiplier;
+                            else { fx += (Math.random()-0.5)*2.0*globalSpeedMultiplier; fz += (Math.random()-0.5)*2.0*globalSpeedMultiplier; }
+                            fz += (centerZ - pos.z) * 0.02;
+                            break;
+                    }
+                }
+
+                this.velocity.x += fx;
+                this.velocity.z += fz;
+                this.velocity.multiplyScalar(FRICTION);
+                const currentSpeed = this.velocity.length();
+                if (currentSpeed > actualMaxSpeed) this.velocity.multiplyScalar(actualMaxSpeed / currentSpeed);
+                this.mesh.position.add(this.velocity);
+
+                if (pos.z < -10) { pos.z = -10; this.velocity.z = 0; }
+                const LIMIT_X = 50; const LIMIT_Z_MAX = 50;
+                if(Math.abs(pos.x) > LIMIT_X) { pos.x = Math.sign(pos.x) * LIMIT_X; this.velocity.x *= -0.5; }
+                if(pos.z > LIMIT_Z_MAX) { pos.z = LIMIT_Z_MAX; this.velocity.z *= -0.5; }
+            }
+        }
+
+        class Security extends Character {
+            constructor(type) {
+                super();
+                this.type = type;
+                const geo = new THREE.CapsuleGeometry(0.75, 2.0, 4, 8);
+                const mat = new THREE.MeshStandardMaterial({ 
+                    color: 0xffffff, 
+                    emissive: 0xffffff, 
+                    emissiveIntensity: (type === 'BONDS' ? 0.8 : 0.2)
+                });
+                this.mesh = new THREE.Mesh(geo, mat);
+                this.mesh.castShadow = true;
+                const startX = Math.random() > 0.5 ? 30 : -30;
+                this.mesh.position.set(startX, 1.75, -5);
+                scene.add(this.mesh);
+            }
+
+            update(otakus) {
+                const pos = this.mesh.position;
+                const mySpeed = (this.type === 'BONDS') ? 0.35 : 0.15;
+
+                let target = null;
+                let minDist = 9999;
+                for(let o of otakus) {
+                    if (o.isFrontRow || o.isFallen) continue; 
+                    const d = pos.distanceToSquared(o.mesh.position);
+                    let score = d;
+                    if (this.type === 'BONDS') {
+                        score = d / (o.velocity.length() + 0.1);
+                    }
+                    if (score < minDist) { minDist = score; target = o; }
+                }
+
+                if (target) {
+                    const dir = new THREE.Vector3().subVectors(target.mesh.position, pos).normalize();
+                    this.velocity.add(dir.multiplyScalar(0.02));
+                } else {
+                    const dir = new THREE.Vector3(0 - pos.x, 0, 15 - pos.z).normalize();
+                    this.velocity.add(dir.multiplyScalar(0.01));
+                }
+
+                this.velocity.multiplyScalar(0.9);
+                if(this.velocity.length() > mySpeed) this.velocity.normalize().multiplyScalar(mySpeed);
+                pos.add(this.velocity);
+                
+                for(let o of otakus) {
+                    const dist = pos.distanceTo(o.mesh.position);
+                    if (dist < 1.5) {
+                        const pushDir = new THREE.Vector3().subVectors(o.mesh.position, pos).normalize();
+                        if (this.type === 'NOIZERO') {
+                            o.velocity.multiplyScalar(0.5);
+                            o.velocity.add(pushDir.multiplyScalar(0.05));
+                            this.velocity.multiplyScalar(0.8);
+                        } else if (this.type === 'BONDS') {
+                            o.velocity.add(pushDir.multiplyScalar(1.0));
+                            if (!o.isFallen && Math.random() < 0.8) o.fall();
+                        }
+                    }
+                }
+                if (pos.z < -10) pos.z = -10;
+            }
+        }
+
+        // --- Main Logic ---
+        const otakus = [];
+        const securities = [];
+        let idCounter = 0;
+
+        function initPopulation() {
+            for(let i=0; i<INITIAL_FRONT_COUNT; i++) otakus.push(new Otaku(idCounter++, true, false));
+            for(let i=0; i<INITIAL_REAR_COUNT; i++) otakus.push(new Otaku(idCounter++, false, (i===0)));
+            updateCountDisplay();
+        }
+
+        window.modifyPopulation = (type, amount) => {
+            const isFront = (type === 'front');
+            const count = Math.abs(amount);
+            const isAdding = amount > 0;
+
+            for(let k=0; k<count; k++){
+                if (isAdding) {
+                    otakus.push(new Otaku(idCounter++, isFront, false));
+                } else {
+                    for(let i = otakus.length - 1; i >= 0; i--) {
+                        const o = otakus[i];
+                        if (o.isFrontRow === isFront && !o.isFC) {
+                            o.dispose();
+                            otakus.splice(i, 1);
+                            break;
+                        }
+                    }
+                }
+            }
+            updateCountDisplay();
+        };
+
+        window.modifySecurity = (targetType, amount) => {
+            if (amount > 0) {
+                securities.push(new Security(targetType));
+            } else {
+                for(let i = securities.length - 1; i >= 0; i--) {
+                    if(securities[i].type === targetType) {
+                        securities[i].dispose();
+                        securities.splice(i, 1);
+                        break;
+                    }
+                }
+            }
+            updateCountDisplay();
+        };
+
+        function updateCountDisplay() {
+            const front = otakus.filter(o => o.isFrontRow).length;
+            const rear = otakus.filter(o => !o.isFrontRow).length;
+            const noi = securities.filter(s => s.type === 'NOIZERO').length;
+            const bond = securities.filter(s => s.type === 'BONDS').length;
+
+            document.getElementById('countFront').innerText = front;
+            document.getElementById('countRear').innerText = rear;
+            document.getElementById('countNoizero').innerText = noi;
+            document.getElementById('countBonds').innerText = bond;
+        }
+
+        initPopulation();
+
+        // --- UI Control ---
+        let currentMode = 'IDLE';
+        const statusDiv = document.getElementById('status');
+        const speedSlider = document.getElementById('speedSlider');
+        const speedVal = document.getElementById('speedVal');
+
+        speedSlider.addEventListener('input', (e) => {
+            globalSpeedMultiplier = parseFloat(e.target.value);
+            speedVal.innerText = globalSpeedMultiplier.toFixed(1) + "x";
+        });
+
+        window.setMode = (mode) => {
+            currentMode = mode;
+            let text = "";
+            switch(mode){
+                case 'IDLE': text = "棒立ち"; break;
+                case 'MOSH': text = "モッシュ"; break;
+                case 'CIRCLE_L': text = "左回り"; break;
+                case 'CIRCLE_R': text = "右回り"; break;
+                case 'WOD_PREPARE': text = "WOD 待機"; break;
+                case 'WOD_GO': text = "WOD 突撃 !!!"; break;
+            }
+            statusDiv.innerText = text;
+        };
+
+        window.resetPositions = () => {
+            setMode('IDLE');
+            otakus.forEach(o => o.reset());
+        };
+
+        // --- Loop ---
+        function animate() {
+            requestAnimationFrame(animate);
+            
+            idolGroup.children.forEach((idol, idx) => {
+                idol.position.y = idolPosY + Math.sin(Date.now()*0.008 + idx)*0.2;
+            });
+
+            otakus.forEach(otaku => otaku.update(currentMode, otakus));
+            securities.forEach(sec => sec.update(otakus));
+
+            renderer.render(scene, camera);
+        }
+
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+
+        animate();
+    </script>
+</body>
+</html>
