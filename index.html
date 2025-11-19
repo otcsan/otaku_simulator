@@ -14,34 +14,62 @@
             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
             overflow: hidden;
             display: flex;
-            flex-direction: column; /* 縦に並べる */
+            flex-direction: column;
         }
 
-        /* 上部：3D描画エリア (残りのスペースを埋める) */
+        /* 3D描画エリア */
         #canvas-container {
             flex: 1; 
             width: 100%;
             position: relative;
             overflow: hidden;
             background: #111;
-            min-height: 0; /* Flexboxでの縮小を許可 */
+            min-height: 0;
         }
 
-        /* 下部：UIパネル (固定領域・被らない) */
-        #ui-panel {
-            flex: 0 0 auto; /* コンテンツのサイズに合わせる */
-            width: 100%;
+        /* UIパネルコンテナ */
+        #ui-container {
+            flex: 0 0 auto;
             background: #222;
             border-top: 1px solid #444;
+            z-index: 100;
+            transition: transform 0.3s ease-in-out;
+            width: 100%;
+            position: relative;
+        }
+
+        #ui-container.minimized {
+            transform: translateY(calc(100% - 32px));
+        }
+
+        #toggle-btn {
+            position: absolute;
+            top: -24px;
+            right: 10px;
+            width: 40px;
+            height: 24px;
+            background: #444;
+            color: white;
+            border: 1px solid #666;
+            border-bottom: none;
+            border-radius: 6px 6px 0 0;
+            cursor: pointer;
+            font-size: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 101;
+        }
+        #toggle-btn:hover { background: #666; }
+
+        #ui-panel {
             padding: 8px;
-            box-sizing: border-box;
             display: flex;
             flex-direction: column;
             gap: 8px;
-            z-index: 100;
+            box-sizing: border-box;
         }
 
-        /* 1行目: ステータスと速度 */
         .top-row {
             display: flex;
             justify-content: space-between;
@@ -57,10 +85,9 @@
         .slider-wrapper { display: flex; align-items: center; gap: 8px; }
         input[type=range] { width: 100px; height: 4px; }
 
-        /* 2行目: 人数管理グリッド */
         .grid-row {
             display: grid;
-            grid-template-columns: 1fr 1fr; /* 2列 */
+            grid-template-columns: 1fr 1fr; 
             gap: 6px;
         }
         
@@ -110,10 +137,9 @@
         }
 
         /* セキュリティの色 */
-        .lbl-noizero { color: #8af; }
-        .lbl-bonds { color: #f88; }
+        .lbl-gentle { color: #8af; } /* 青系: 優しい */
+        .lbl-scary { color: #f88; }  /* 赤系: 怖い */
 
-        /* 3行目: アクションボタン（横スクロール） */
         .action-scroll {
             display: flex;
             gap: 8px;
@@ -136,85 +162,93 @@
             cursor: pointer;
         }
         .btn-action:active { background: #555; color: white; }
-        
         .btn-red { background: #522; border-color: #844; color: #fdd; }
-        .btn-red:active { background: #733; }
 
     </style>
-    <script src="https://unpkg.com/three@0.160.0/build/three.min.js"></script>
+
+    <!-- Import Map -->
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+                "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+            }
+        }
+    </script>
 </head>
 <body>
 
-    <!-- 上部: 3D描画エリア -->
     <div id="canvas-container"></div>
 
-    <!-- 下部: コンパクトUIパネル -->
-    <div id="ui-panel">
-        
-        <!-- 1. ステータス & 速度 -->
-        <div class="top-row">
-            <div>STATE: <span id="statusText" class="status-text">IDLE</span></div>
-            <div class="slider-wrapper">
-                <span>SPD</span>
-                <input type="range" id="speedSlider" min="0.1" max="3.0" step="0.1" value="1.0">
-                <span id="speedVal">1.0x</span>
+    <div id="ui-container">
+        <div id="toggle-btn">▼</div>
+
+        <div id="ui-panel">
+            <!-- 1. ステータス & 速度 -->
+            <div class="top-row">
+                <div>STATE: <span id="statusText" class="status-text">IDLE</span></div>
+                <div class="slider-wrapper">
+                    <span>SPD</span>
+                    <input type="range" id="speedSlider" min="0.1" max="3.0" step="0.1" value="1.0">
+                    <span id="speedVal">1.0x</span>
+                </div>
+            </div>
+
+            <!-- 2. 人数管理 -->
+            <div class="grid-row">
+                <div class="ctrl-box">
+                    <div class="ctrl-label">前方オタク<span>(±10)</span></div>
+                    <div class="ctrl-buttons">
+                        <button class="btn-mini" id="btnFrontMinus">-</button>
+                        <span id="countFront" class="count-text">0</span>
+                        <button class="btn-mini" id="btnFrontPlus">+</button>
+                    </div>
+                </div>
+                <div class="ctrl-box">
+                    <div class="ctrl-label">後方オタク<span>(±10)</span></div>
+                    <div class="ctrl-buttons">
+                        <button class="btn-mini" id="btnRearMinus">-</button>
+                        <span id="countRear" class="count-text">0</span>
+                        <button class="btn-mini" id="btnRearPlus">+</button>
+                    </div>
+                </div>
+                <!-- 優しいセキュリティ -->
+                <div class="ctrl-box" style="border-color: #345;">
+                    <div class="ctrl-label lbl-gentle">優しいセキュリティ<span>(±1)</span></div>
+                    <div class="ctrl-buttons">
+                        <button class="btn-mini" id="btnGentleMinus">-</button>
+                        <span id="countGentle" class="count-text">0</span>
+                        <button class="btn-mini" id="btnGentlePlus">+</button>
+                    </div>
+                </div>
+                <!-- 怖いセキュリティ -->
+                <div class="ctrl-box" style="border-color: #533;">
+                    <div class="ctrl-label lbl-scary">怖いセキュリティ<span>(±1)</span></div>
+                    <div class="ctrl-buttons">
+                        <button class="btn-mini" id="btnScaryMinus">-</button>
+                        <span id="countScary" class="count-text">0</span>
+                        <button class="btn-mini" id="btnScaryPlus">+</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 3. アクションボタン -->
+            <div class="action-scroll">
+                <button class="btn-action" id="btnIdle">棒立ち</button>
+                <button class="btn-action" id="btnMosh">モッシュ</button>
+                <button class="btn-action" id="btnCircleL">↺ 左回り</button>
+                <button class="btn-action" id="btnCircleR">↻ 右回り</button>
+                <button class="btn-action btn-red" id="btnWodPrep">WOD待機</button>
+                <button class="btn-action btn-red" id="btnWodGo">WOD突撃</button>
+                <button class="btn-action" id="btnReset">リセット</button>
             </div>
         </div>
-
-        <!-- 2. 人数管理 (4ブロック) -->
-        <div class="grid-row">
-            <!-- 前方 -->
-            <div class="ctrl-box">
-                <div class="ctrl-label">前方<span>(±10)</span></div>
-                <div class="ctrl-buttons">
-                    <button class="btn-mini" onclick="modifyPopulation('front', -10)">-</button>
-                    <span id="countFront" class="count-text">0</span>
-                    <button class="btn-mini" onclick="modifyPopulation('front', 10)">+</button>
-                </div>
-            </div>
-            <!-- 後方 -->
-            <div class="ctrl-box">
-                <div class="ctrl-label">後方<span>(±10)</span></div>
-                <div class="ctrl-buttons">
-                    <button class="btn-mini" onclick="modifyPopulation('rear', -10)">-</button>
-                    <span id="countRear" class="count-text">0</span>
-                    <button class="btn-mini" onclick="modifyPopulation('rear', 10)">+</button>
-                </div>
-            </div>
-            <!-- ノイゼロ -->
-            <div class="ctrl-box" style="border-color: #345;">
-                <div class="ctrl-label lbl-noizero">ノイゼロ<span>(±1)</span></div>
-                <div class="ctrl-buttons">
-                    <button class="btn-mini" onclick="modifySecurity('NOIZERO', -1)">-</button>
-                    <span id="countNoizero" class="count-text">0</span>
-                    <button class="btn-mini" onclick="modifySecurity('NOIZERO', 1)">+</button>
-                </div>
-            </div>
-            <!-- ボンズ -->
-            <div class="ctrl-box" style="border-color: #533;">
-                <div class="ctrl-label lbl-bonds">ボンズ<span>(±1)</span></div>
-                <div class="ctrl-buttons">
-                    <button class="btn-mini" onclick="modifySecurity('BONDS', -1)">-</button>
-                    <span id="countBonds" class="count-text">0</span>
-                    <button class="btn-mini" onclick="modifySecurity('BONDS', 1)">+</button>
-                </div>
-            </div>
-        </div>
-
-        <!-- 3. アクションボタン -->
-        <div class="action-scroll">
-            <button class="btn-action" onclick="setMode('IDLE')">棒立ち</button>
-            <button class="btn-action" onclick="setMode('MOSH')">モッシュ</button>
-            <button class="btn-action" onclick="setMode('CIRCLE_L')">↺ 左回り</button>
-            <button class="btn-action" onclick="setMode('CIRCLE_R')">↻ 右回り</button>
-            <button class="btn-action btn-red" onclick="setMode('WOD_PREPARE')">WOD待機</button>
-            <button class="btn-action btn-red" onclick="setMode('WOD_GO')">WOD突撃</button>
-            <button class="btn-action" onclick="resetPositions()">リセット</button>
-        </div>
-
     </div>
 
-    <script>
+    <script type="module">
+        import * as THREE from 'three';
+        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
         // --- 設定 ---
         const INITIAL_FRONT_COUNT = 40;
         const INITIAL_REAR_COUNT = 100;
@@ -230,19 +264,27 @@
         scene.background = new THREE.Color(0x1a1a1a);
         scene.fog = new THREE.Fog(0x1a1a1a, 30, 100);
 
-        // コンテナサイズに合わせてカメラ設定
         const camera = new THREE.PerspectiveCamera(60, container.clientWidth / container.clientHeight, 0.1, 1000);
         camera.position.set(0, 45, 65);
-        camera.lookAt(0, 0, -10);
 
         const renderer = new THREE.WebGLRenderer({ antialias: true });
         renderer.setSize(container.clientWidth, container.clientHeight);
         renderer.shadowMap.enabled = true;
         container.appendChild(renderer.domElement);
 
+        // --- Controls ---
+        const controls = new OrbitControls(camera, renderer.domElement);
+        controls.enableDamping = true;
+        controls.dampingFactor = 0.05;
+        controls.screenSpacePanning = false;
+        controls.minDistance = 10;
+        controls.maxDistance = 150;
+        controls.maxPolarAngle = Math.PI / 2 - 0.05; 
+
         // --- Lighting ---
-        const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+        const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
         scene.add(ambientLight);
+
         const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
         dirLight.position.set(20, 50, 20);
         dirLight.castShadow = true;
@@ -250,6 +292,7 @@
         dirLight.shadow.camera.left = -60; dirLight.shadow.camera.right = 60;
         dirLight.shadow.mapSize.width = 2048; dirLight.shadow.mapSize.height = 2048;
         scene.add(dirLight);
+
         const spotLight = new THREE.SpotLight(0xffffff, 100);
         spotLight.position.set(0, 50, STAGE_Z + 15);
         spotLight.target.position.set(0, 0, STAGE_Z);
@@ -258,7 +301,12 @@
         scene.add(spotLight);
         scene.add(spotLight.target);
 
-        // --- Environment ---
+        // 前方オタク用補助ライト
+        const frontFillLight = new THREE.PointLight(0xffddcc, 1.0, 40);
+        frontFillLight.position.set(0, 10, -5); 
+        scene.add(frontFillLight);
+
+        // --- Objects ---
         const floorGeo = new THREE.PlaneGeometry(200, 200);
         const floorMat = new THREE.MeshStandardMaterial({ color: 0x333333, roughness: 0.6 });
         const floor = new THREE.Mesh(floorGeo, floorMat);
@@ -324,6 +372,7 @@
                 const geometry = new THREE.CapsuleGeometry(0.6, 1.8, 4, 8);
                 this.mesh = new THREE.Mesh(geometry, material);
                 this.mesh.castShadow = true;
+                this.mesh.userData = { owner: this };
 
                 this.originalPos = new THREE.Vector3();
                 this.setInitialPosition();
@@ -468,12 +517,12 @@
         class Security extends Character {
             constructor(type) {
                 super();
-                this.type = type;
+                this.type = type; // GENTLE or SCARY
                 const geo = new THREE.CapsuleGeometry(0.75, 2.0, 4, 8);
                 const mat = new THREE.MeshStandardMaterial({ 
                     color: 0xffffff, 
                     emissive: 0xffffff, 
-                    emissiveIntensity: (type === 'BONDS' ? 0.8 : 0.2)
+                    emissiveIntensity: (type === 'SCARY' ? 0.8 : 0.2)
                 });
                 this.mesh = new THREE.Mesh(geo, mat);
                 this.mesh.castShadow = true;
@@ -484,7 +533,7 @@
 
             update(otakus) {
                 const pos = this.mesh.position;
-                const mySpeed = (this.type === 'BONDS') ? 0.35 : 0.15;
+                const mySpeed = (this.type === 'SCARY') ? 0.35 : 0.15;
 
                 let target = null;
                 let minDist = 9999;
@@ -492,9 +541,8 @@
                     if (o.isFrontRow || o.isFallen) continue; 
                     const d = pos.distanceToSquared(o.mesh.position);
                     let score = d;
-                    if (this.type === 'BONDS') {
-                        score = d / (o.velocity.length() + 0.1);
-                    }
+                    // 怖いセキュリティは速度が出ているオタクを優先
+                    if (this.type === 'SCARY') score = d / (o.velocity.length() + 0.1);
                     if (score < minDist) { minDist = score; target = o; }
                 }
 
@@ -514,11 +562,13 @@
                     const dist = pos.distanceTo(o.mesh.position);
                     if (dist < 1.5) {
                         const pushDir = new THREE.Vector3().subVectors(o.mesh.position, pos).normalize();
-                        if (this.type === 'NOIZERO') {
+                        if (this.type === 'GENTLE') {
+                            // 優しいセキュリティ: 減速
                             o.velocity.multiplyScalar(0.5);
                             o.velocity.add(pushDir.multiplyScalar(0.05));
                             this.velocity.multiplyScalar(0.8);
-                        } else if (this.type === 'BONDS') {
+                        } else if (this.type === 'SCARY') {
+                            // 怖いセキュリティ: タックル
                             o.velocity.add(pushDir.multiplyScalar(1.0));
                             if (!o.isFallen && Math.random() < 0.8) o.fall();
                         }
@@ -539,7 +589,7 @@
             updateCountDisplay();
         }
 
-        window.modifyPopulation = (type, amount) => {
+        function modifyPopulation(type, amount) {
             const isFront = (type === 'front');
             const count = Math.abs(amount);
             const isAdding = amount > 0;
@@ -559,9 +609,9 @@
                 }
             }
             updateCountDisplay();
-        };
+        }
 
-        window.modifySecurity = (targetType, amount) => {
+        function modifySecurity(targetType, amount) {
             if (amount > 0) {
                 securities.push(new Security(targetType));
             } else {
@@ -574,34 +624,60 @@
                 }
             }
             updateCountDisplay();
-        };
+        }
 
         function updateCountDisplay() {
-            const front = otakus.filter(o => o.isFrontRow).length;
-            const rear = otakus.filter(o => !o.isFrontRow).length;
-            const noi = securities.filter(s => s.type === 'NOIZERO').length;
-            const bond = securities.filter(s => s.type === 'BONDS').length;
-
-            document.getElementById('countFront').innerText = front;
-            document.getElementById('countRear').innerText = rear;
-            document.getElementById('countNoizero').innerText = noi;
-            document.getElementById('countBonds').innerText = bond;
+            document.getElementById('countFront').innerText = otakus.filter(o => o.isFrontRow).length;
+            document.getElementById('countRear').innerText = otakus.filter(o => !o.isFrontRow).length;
+            document.getElementById('countGentle').innerText = securities.filter(s => s.type === 'GENTLE').length;
+            document.getElementById('countScary').innerText = securities.filter(s => s.type === 'SCARY').length;
         }
 
         initPopulation();
 
-        // --- UI Control ---
+        // --- UI Event Wiring ---
         let currentMode = 'IDLE';
         const statusText = document.getElementById('statusText');
-        const speedSlider = document.getElementById('speedSlider');
-        const speedVal = document.getElementById('speedVal');
-
-        speedSlider.addEventListener('input', (e) => {
+        
+        document.getElementById('speedSlider').addEventListener('input', (e) => {
             globalSpeedMultiplier = parseFloat(e.target.value);
-            speedVal.innerText = globalSpeedMultiplier.toFixed(1) + "x";
+            document.getElementById('speedVal').innerText = globalSpeedMultiplier.toFixed(1) + "x";
         });
 
-        window.setMode = (mode) => {
+        const bindBtn = (id, cb) => document.getElementById(id).addEventListener('click', cb);
+
+        bindBtn('btnIdle', () => setMode('IDLE'));
+        bindBtn('btnMosh', () => setMode('MOSH'));
+        bindBtn('btnCircleL', () => setMode('CIRCLE_L'));
+        bindBtn('btnCircleR', () => setMode('CIRCLE_R'));
+        bindBtn('btnWodPrep', () => setMode('WOD_PREPARE'));
+        bindBtn('btnWodGo', () => setMode('WOD_GO'));
+        bindBtn('btnReset', () => { setMode('IDLE'); otakus.forEach(o=>o.reset()); });
+
+        bindBtn('btnFrontPlus', () => modifyPopulation('front', 10));
+        bindBtn('btnFrontMinus', () => modifyPopulation('front', -10));
+        bindBtn('btnRearPlus', () => modifyPopulation('rear', 10));
+        bindBtn('btnRearMinus', () => modifyPopulation('rear', -10));
+        bindBtn('btnGentlePlus', () => modifySecurity('GENTLE', 1));
+        bindBtn('btnGentleMinus', () => modifySecurity('GENTLE', -1));
+        bindBtn('btnScaryPlus', () => modifySecurity('SCARY', 1));
+        bindBtn('btnScaryMinus', () => modifySecurity('SCARY', -1));
+
+        const uiContainer = document.getElementById('ui-container');
+        const toggleBtn = document.getElementById('toggle-btn');
+        let isMinimized = false;
+        toggleBtn.addEventListener('click', () => {
+            isMinimized = !isMinimized;
+            if(isMinimized) {
+                uiContainer.classList.add('minimized');
+                toggleBtn.innerText = '▲';
+            } else {
+                uiContainer.classList.remove('minimized');
+                toggleBtn.innerText = '▼';
+            }
+        });
+
+        function setMode(mode) {
             currentMode = mode;
             let text = "";
             switch(mode){
@@ -609,20 +685,16 @@
                 case 'MOSH': text = "MOSH"; break;
                 case 'CIRCLE_L': text = "CIRCLE L"; break;
                 case 'CIRCLE_R': text = "CIRCLE R"; break;
-                case 'WOD_PREPARE': text = "WOD PREPARE"; break;
+                case 'WOD_PREPARE': text = "WOD PREP"; break;
                 case 'WOD_GO': text = "WOD GO"; break;
             }
             statusText.innerText = text;
-        };
-
-        window.resetPositions = () => {
-            setMode('IDLE');
-            otakus.forEach(o => o.reset());
-        };
+        }
 
         // --- Loop ---
         function animate() {
             requestAnimationFrame(animate);
+            controls.update(); 
             
             idolGroup.children.forEach((idol, idx) => {
                 idol.position.y = idolPosY + Math.sin(Date.now()*0.008 + idx)*0.2;
@@ -634,7 +706,6 @@
             renderer.render(scene, camera);
         }
 
-        // Resize Handler
         window.addEventListener('resize', () => {
             const w = container.clientWidth;
             const h = container.clientHeight;
